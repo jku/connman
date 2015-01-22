@@ -54,6 +54,7 @@ struct agent_data {
 	struct agent_input_data *input;
 	char *interface;
 	bool registered;
+	bool auto_accept;
 	DBusMessage *message;
 	DBusMessage *reply;
 	DBusMessageIter iter;
@@ -589,27 +590,36 @@ static DBusMessage *agent_request_input(DBusConnection *connection,
 	return NULL;
 }
 
+static void send_authorization_reply(struct agent_data *request, bool include_empty_wps)
+{
+	request->reply = dbus_message_new_method_return(request->message);
+	dbus_message_iter_init_append(request->reply, &request->iter);
+
+	dbus_message_iter_open_container(&request->iter,
+			DBUS_TYPE_ARRAY,
+			DBUS_DICT_ENTRY_BEGIN_CHAR_AS_STRING
+			DBUS_TYPE_STRING_AS_STRING
+			DBUS_TYPE_VARIANT_AS_STRING
+			DBUS_DICT_ENTRY_END_CHAR_AS_STRING,
+			&request->dict);
+
+	if (include_empty_wps) {
+		request_input_append(request, "WPS", "");
+		request->input[WPS].requested = false;
+	}
+
+	dbus_message_iter_close_container(&request->iter, &request->dict);
+	g_dbus_send_message(agent_connection, request->reply);
+	request->reply = NULL;
+}
+
 static void request_authorization_return(char *input, void *user_data)
 {
 	struct agent_data *request = user_data;
 
 	switch (confirm_input(input)) {
 	case 1:
-		request->reply = dbus_message_new_method_return(
-							request->message);
-		dbus_message_iter_init_append(request->reply, &request->iter);
-
-		dbus_message_iter_open_container(&request->iter,
-				DBUS_TYPE_ARRAY,
-				DBUS_DICT_ENTRY_BEGIN_CHAR_AS_STRING
-				DBUS_TYPE_STRING_AS_STRING
-				DBUS_TYPE_VARIANT_AS_STRING
-				DBUS_DICT_ENTRY_END_CHAR_AS_STRING,
-				&request->dict);
-		dbus_message_iter_close_container(&request->iter,
-							&request->dict);
-		g_dbus_send_message(agent_connection, request->reply);
-		request->reply = NULL;
+		send_authorization_reply(request, FALSE);
 		break;
 	case 0:
 		 g_dbus_send_error(agent_connection, request->message,
@@ -632,7 +642,7 @@ agent_request_peer_authorization(DBusConnection *connection,
 	struct agent_data *request = user_data;
 	DBusMessageIter iter, dict;
 	char *peer, *str;
-	bool input;
+	bool input, is_wps;
 	int i;
 
 	if (handle_message(message, request, agent_request_peer_authorization)
@@ -657,8 +667,19 @@ agent_request_peer_authorization(DBusConnection *connection,
 	for (input = false, i = 0; request->input[i].attribute; i++) {
 		if (request->input[i].requested == true) {
 			input = true;
+			is_wps = (i == WPS);
 			break;
 		}
+	}
+
+	if (request->auto_accept && (!input || is_wps)) {
+		request->message = dbus_message_ref(message);
+		send_authorization_reply(request, is_wps);
+		fprintf(stdout, "Connection accepted\n");
+		pending_message_remove(request);
+		pending_command_complete("");
+
+		return NULL;
 	}
 
 	if (!input) {
@@ -735,10 +756,13 @@ static void append_path(DBusMessageIter *iter, void *user_data)
 	dbus_message_iter_append_basic(iter, DBUS_TYPE_OBJECT_PATH, &path);
 }
 
-int __connmanctl_agent_register(DBusConnection *connection)
+int __connmanctl_agent_register(DBusConnection *connection,
+		bool auto_accept)
 {
 	char *path = agent_path();
 	int result;
+
+	agent_request.auto_accept = auto_accept;
 
 	if (agent_request.registered == true) {
 		fprintf(stderr, "Agent already registered\n");

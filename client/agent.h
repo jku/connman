@@ -29,7 +29,7 @@
 extern "C" {
 #endif
 
-int __connmanctl_agent_register(DBusConnection *connection);
+int __connmanctl_agent_register(DBusConnection *connection, bool auto_accept);
 int __connmanctl_agent_unregister(DBusConnection *connection);
 
 int __connmanctl_vpn_agent_register(DBusConnection *connection);

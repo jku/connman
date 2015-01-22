@@ -1332,20 +1332,26 @@ static int cmd_agent(char *args[], int num, struct connman_option *options)
 	if (num < 2)
 		return -EINVAL;
 
-	switch(parse_boolean(args[1])) {
-	case 0:
-		__connmanctl_agent_unregister(connection);
-		break;
-
-	case 1:
-		if (__connmanctl_agent_register(connection) == -EINPROGRESS)
+	if(strcasecmp(args[1], "auto") == 0) {
+		if (__connmanctl_agent_register(connection, TRUE) == -EINPROGRESS)
 			return -EINPROGRESS;
 
-		break;
+	} else {
+		switch(parse_boolean(args[1])) {
+		case 0:
+			__connmanctl_agent_unregister(connection);
+			break;
 
-	default:
-		return -EINVAL;
-		break;
+		case 1:
+			if (__connmanctl_agent_register(connection, FALSE) == -EINPROGRESS)
+				return -EINPROGRESS;
+
+			break;
+
+		default:
+			return -EINVAL;
+			break;
+		}
 	}
 
 	return 0;
@@ -1983,6 +1989,30 @@ static char *lookup_on_off(const char *text, int state)
 	return NULL;
 }
 
+static char *lookup_on_off_auto(const char *text, int state)
+{
+	char *onoffauto[] = { "on", "off", "auto", NULL };
+	static int idx = 0;
+	static int len = 0;
+
+	char *str;
+
+	if (!state) {
+		idx = 0;
+		len = strlen(text);
+	}
+
+	while (onoffauto[idx]) {
+		str = onoffauto[idx];
+		idx++;
+
+		if (!strncmp(text, str, len))
+			return strdup(str);
+	}
+
+	return NULL;
+}
+
 static char *lookup_tether(const char *text, int state)
 {
 	int level;
@@ -2006,7 +2036,7 @@ static char *lookup_agent(const char *text, int state)
 		return NULL;
 	}
 
-	return lookup_on_off(text, state);
+	return lookup_on_off_auto(text, state);
 }
 
 static struct connman_option service_options[] = {
@@ -2402,7 +2432,7 @@ static const struct {
 	  "Set service configuration options", lookup_config },
 	{ "monitor",      "[off]",        monitor_options, cmd_monitor,
 	  "Monitor signals from interfaces", lookup_monitor },
-	{ "agent", "on|off",              NULL,            cmd_agent,
+	{ "agent", "on|off|auto",         NULL,            cmd_agent,
 	  "Agent mode", lookup_agent },
 	{"vpnconnections", "[<connection>]", NULL,         cmd_vpnconnections,
 	 "Display VPN connections", NULL },
